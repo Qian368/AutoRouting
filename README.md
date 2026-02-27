@@ -3,29 +3,6 @@
 ## 项目简介
 本项目是一个基于“四步法”理论的回路导线布局辅助设计工具。它允许用户在二维画布上绘制电气节点（配电箱、开关、灯具、插座等）和导管连接，并通过交互式定义受控单元，自动计算每根导管内需要穿过的导线数量和类型。
 
-## 项目架构
-```mermaid
-graph TD
-    Main[main.py] --> MainWindow[src.frontend.main_window]
-    MainWindow --> Scene[src.frontend.canvas]
-    MainWindow --> Dialogs[src.frontend.dialogs]
-    MainWindow --> UnitManager[src.frontend.unit_manager]
-    MainWindow --> CircuitManager[src.frontend.circuit_manager]
-    MainWindow --> Calculator[src.backend.algorithms]
-    
-    Scene --> Models[src.backend.models]
-    UnitManager --> Models
-    UnitManager --> Dialogs
-    CircuitManager --> Models
-    Calculator --> Models
-    Calculator --> NetworkX[NetworkX Graph Lib]
-    
-    Models --> Constants[src.backend.models (Enum)]
-    MainWindow --> Messages[src.common.messages]
-    UnitManager --> Messages
-    CircuitManager --> Messages
-```
-
 ### 模块说明
 - **src/frontend**: 包含图形用户界面代码 (PyQt6)。
     - `main_window.py`: 主窗口逻辑，集成画布、工具栏、属性面板和全局快捷键。
