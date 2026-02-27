@@ -10,6 +10,7 @@
     - `unit_manager.py`: 单元管理对话框，负责受控/非受控单元的创建、编辑和独立编号管理。
     - `circuit_manager.py`: 回路管理器，支持多回路定义、配电箱关联及成员节点分配。
     - `dialogs.py`: 属性设置和单元定义基础对话框。
+    - `property_manager.py`: 属性面板管理器，负责节点、导管属性的展示与编辑。
 - **src/backend**: 包含核心业务逻辑。
     - `models.py`: 定义系统数据结构 (Node, Conduit, Wire, Unit, Circuit, CircuitSystem)，包含级联更新和独立自增编号算法。
     - `algorithms.py`: 实现“四步法”布线算法及基于 MST 的自动拓扑生成。
