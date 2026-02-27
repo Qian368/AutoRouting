@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
 from PyQt6.QtGui import QAction, QIcon, QKeySequence
 from PyQt6.QtCore import Qt
 
-from src.backend.models import CircuitSystem, Node, Conduit, Unit, NodeType
+from src.backend.models import CircuitSystem, Node, Conduit, Unit, Circuit, NodeType
 from src.backend.algorithms import WiringCalculator, TopologyGenerator
 from src.frontend.canvas import CircuitScene, NodeItem, ConduitItem
 from src.frontend.dialogs import NodePropertyDialog, UnitDefinitionDialog, SwitchGangSelectDialog
@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
 
         self.toolbar.addSeparator() # 分隔符
         self.add_tool_action(messages.TOOL_CIRCUIT_MANAGER, self.manage_circuits)  # 回路管理器     
+        self.add_tool_action(messages.BTN_DEFINE_CIRCUIT_FROM_SELECTION, self.define_circuit_from_selection)  # 从选择定义回路
 
         self.toolbar.addSeparator() # 分隔符  
         self.add_tool_action(messages.BTN_DEFINE_UNITS, self.manage_units)  # 定义单元
@@ -160,7 +161,8 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(messages.MSG_ADD_NODE_MODE.format(node_type=node_type.value))   # 状态栏显示添加节点工具提示        
         self.prop_manager.update_panel()       # 确保属性面板显示默认参数区域
 
-    def _prefix_for(self, node_type: NodeType) -> str:  # 节点类型映射
+    def _prefix_for(self, node_type: NodeType) -> str: 
+        """根据节点类型返回默认ID前缀"""
         if node_type == NodeType.DISTRIBUTION_BOX:
             return "DB"
         if node_type == NodeType.SWITCH:
@@ -270,41 +272,103 @@ class MainWindow(QMainWindow):
         ids = []
         for item in self.scene.selectedItems():
             if isinstance(item, NodeItem):
-                if item.node.node_type in (NodeType.LIGHT, NodeType.SOCKET):
-                    ids.append(item.node.id)
+                # 包含所有类型节点，不仅限于灯具和插座
+                # 逻辑层会在具体功能中过滤
+                ids.append(item.node.id)
         return ids
-    
-    def define_uncontrolled_from_selection(self):
-        """基于当前选择定义非受控单元"""
+
+    def define_circuit_from_selection(self): 
+        """基于当前选择定义回路"""
         selected_ids = self._selected_device_nodes()
         if not selected_ids:
             QMessageBox.information(self, messages.DLG_INFO_TITLE, messages.MSG_NO_SELECTION)
             return
-        # 过滤掉已属于单元的节点
-        final_ids = []
+        
+        # 检查是否包含配电箱，如果有，必须只有一个
+        dist_box_ids = [nid for nid in selected_ids if self.system.nodes[nid].node_type == NodeType.DISTRIBUTION_BOX]
+        if len(dist_box_ids) > 1:
+            QMessageBox.warning(self, messages.DLG_WARNING_TITLE, messages.MSG_ONLY_ONE_DISTRIBUTION_BOX)
+            return
+        
+        # 检查是否已属于回路
         for nid in selected_ids:
             n = self.system.nodes.get(nid)
-            if n and (n.controlled_unit_id is None and n.uncontrolled_unit_id is None):
-                final_ids.append(nid)
-        if not final_ids:
-            QMessageBox.information(self, messages.DLG_INFO_TITLE, messages.MSG_NO_MORE_DEVICES)
+            # 允许配电箱属于多个回路
+            if n.node_type == NodeType.DISTRIBUTION_BOX:
+                continue
+            # 检查节点是否已在其他回路中
+            for c in self.system.circuits.values():
+                if nid in c.member_node_ids:
+                    QMessageBox.information(self, messages.DLG_INFO_TITLE, messages.MSG_ALREADY_IN_CIRCUIT.format(node_name=n.label))
+                    return
+
+        # 确定配电箱ID
+        dist_box_id = dist_box_ids[0] if dist_box_ids else (self.system.distribution_box_id or "")
+        if not dist_box_id:
+             QMessageBox.warning(self, messages.DLG_WARNING_TITLE, messages.MSG_NO_DISTRIBUTION_BOX)
+             return
+
+        # 创建回路（顺序ID：C-Cx）
+        circuit_id = self.system.generate_circuit_id()
+        name = self.system.generate_circuit_name()
+        
+        member_ids = [nid for nid in selected_ids if nid != dist_box_id]
+        
+        circuit = Circuit(id=circuit_id, name=name, distribution_box_id=dist_box_id, member_node_ids=member_ids)
+        try:
+            self.system.add_circuit(circuit)
+            QMessageBox.information(self, messages.DLG_INFO_TITLE, messages.MSG_CREATED_CIRCUIT.format(name=name))
+            self.prop_manager.update_panel()
+        except ValueError as e:
+            QMessageBox.warning(self, messages.DLG_WARNING_TITLE, str(e))       
+
+    def define_uncontrolled_from_selection(self):
+        """基于当前选择定义非受控单元"""
+        selected_ids = self._selected_device_nodes()
+        # 过滤排除配电箱、开关和已属于单元的节点
+        valid_ids = []
+        for nid in selected_ids:
+            node = self.system.nodes.get(nid)
+            # 排除配电箱和开关
+            if node.node_type in (NodeType.DISTRIBUTION_BOX, NodeType.SWITCH):
+                continue
+            # 排除已属于单元的节点
+            if node.controlled_unit_id or node.uncontrolled_unit_id:
+                continue
+            valid_ids.append(nid)
+        
+        if not valid_ids:
+            QMessageBox.information(self, messages.DLG_INFO_TITLE, messages.MSG_NO_SELECTION)
             return
+
         # 创建单元（顺序ID：U-UTx）
         unit_id = self.system.generate_unit_id("非受控")
         name = self.system.generate_unit_name("非受控")
-        unit = Unit(id=unit_id, name=name, unit_type="非受控", description="基于选择创建", member_node_ids=final_ids)
+        unit = Unit(id=unit_id, name=name, unit_type="非受控", description="基于选择创建", member_node_ids=valid_ids)
         self.system.add_unit(unit)
-        for nid in final_ids:
+        for nid in valid_ids:
             node = self.system.nodes.get(nid)
             if node:
                 node.uncontrolled_unit_id = unit_id
-        QMessageBox.information(self, messages.DLG_INFO_TITLE, messages.MSG_CREATED_UNCONTROLLED.format(unit_name=name, count=len(final_ids)))
+        QMessageBox.information(self, messages.DLG_INFO_TITLE, messages.MSG_CREATED_UNCONTROLLED.format(unit_name=name, count=len(valid_ids)))
         self.prop_manager.update_panel()
     
     def define_controlled_from_selection(self):
         """基于当前选择定义受控单元（需选择开关与联数）"""
         selected_ids = self._selected_device_nodes()
-        if not selected_ids:
+        # 过滤排除配电箱、开关和已属于单元的节点
+        valid_ids = []
+        for nid in selected_ids:
+            node = self.system.nodes.get(nid)
+            # 排除配电箱和开关
+            if node.node_type in (NodeType.DISTRIBUTION_BOX, NodeType.SWITCH):
+                continue
+            # 排除已属于单元的节点
+            if node.controlled_unit_id or node.uncontrolled_unit_id:
+                continue
+            valid_ids.append(nid)
+        
+        if not valid_ids:
             QMessageBox.information(self, messages.DLG_INFO_TITLE, messages.MSG_NO_SELECTION)
             return
         switches = [n for n in self.system.nodes.values() if n.node_type == NodeType.SWITCH and (n.gangs or 0) > 0]
@@ -316,16 +380,9 @@ class MainWindow(QMainWindow):
             switch, gang = dlg.get_selection()
             if not switch:
                 return
-            # 过滤已分配
-            candidates = []
-            for nid in selected_ids:
-                n = self.system.nodes.get(nid)
-                if n and (n.controlled_unit_id is None and n.uncontrolled_unit_id is None):
-                    candidates.append(n)
-            if not candidates:
-                QMessageBox.information(self, messages.DLG_INFO_TITLE, messages.MSG_NO_MORE_DEVICES)
-                return
+            
             # 打开成员选择对话框，预选当前选择
+            candidates = [self.system.nodes[nid] for nid in valid_ids]
             udlg = UnitDefinitionDialog(switch, gang, candidates, self, initial_selection=[n.id for n in candidates])
             if udlg.exec():
                 final_ids = udlg.get_selected_light_ids()
@@ -369,8 +426,16 @@ class MainWindow(QMainWindow):
             traceback.print_exc()
             QMessageBox.critical(self, messages.DLG_ERROR_TITLE, str(e))
 
-    # ---------- 调试功能 ----------
+    def toggle_defaults_lock(self):
+        """切换默认参数锁定状态"""
+        self.defaults_locked = not self.defaults_locked
+        self.status_bar.showMessage(
+            messages.MSG_PARAMS_LOCKED if self.defaults_locked else messages.MSG_PARAMS_UNLOCKED
+        )
+        self.prop_manager.update_panel()
     
+    
+    # ---------- 调试功能 ----------
     def refresh_scene_full(self):
         """全量刷新场景"""
         self.scene.clear()
@@ -447,12 +512,4 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(messages.MSG_DELETED_ITEMS.format(count=count))
         self.prop_manager.update_panel()
 
-    def toggle_defaults_lock(self):
-        """切换默认参数锁定状态"""
-        self.defaults_locked = not self.defaults_locked
-        self.status_bar.showMessage(
-            messages.MSG_PARAMS_LOCKED if self.defaults_locked else messages.MSG_PARAMS_UNLOCKED
-        )
-        self.prop_manager.update_panel()
-    
 

@@ -257,6 +257,35 @@ class CircuitSystem:
         seq = min(missing) if missing else max_seq + 1
         return f"{prefix}{seq}"
         
+    def generate_circuit_id(self) -> str:
+        """生成回路ID（C-Cx），使用最小缺失序号"""
+        prefix = "C-C"
+        existing_ids = [cid for cid in self.circuits.keys() if cid.startswith(prefix)]
+        existing_seqs = {int(cid[len(prefix):]) for cid in existing_ids if cid[len(prefix):].isdigit()}
+        max_seq = max(existing_seqs) if existing_seqs else 0
+        all_seqs = set(range(1, max_seq + 2))
+        missing = all_seqs - existing_seqs
+        seq = min(missing) if missing else max_seq + 1
+        return f"{prefix}{seq}"
+
+    def generate_circuit_name(self) -> str:
+        """生成回路名称，独立自增"""
+        prefix = "回路"
+        existing_names = [c.name for c in self.circuits.values() if c.name.startswith(prefix)]
+        existing_seqs = set()
+        for name in existing_names:
+            try:
+                num_str = name[len(prefix):].strip()
+                if num_str.isdigit():
+                    existing_seqs.add(int(num_str))
+            except:
+                continue
+        max_seq = max(existing_seqs) if existing_seqs else 0
+        all_seqs = set(range(1, max_seq + 2))
+        missing = all_seqs - existing_seqs
+        seq = min(missing) if missing else max_seq + 1
+        return f"{prefix}{seq}"
+
     def get_neighbors(self, node_id: str) -> List[str]:
         return list(self.adj.get(node_id, {}).keys())
 

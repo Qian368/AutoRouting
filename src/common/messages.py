@@ -79,6 +79,7 @@ MSG_PARAMS_UNLOCKED = "默认参数已解锁"
 BTN_DEFINE_UNITS = "交互式定义单元"
 BTN_CALCULATE_WIRING = "生成布线方案"
 BTN_RESET = "重置"
+BTN_DEFINE_CIRCUIT_FROM_SELECTION = "从选择定义回路"
 BTN_DEFINE_CONTROLLED_FROM_SELECTION = "从选择定义受控单元"
 BTN_DEFINE_UNCONTROLLED_FROM_SELECTION = "从选择定义非受控单元"
 
@@ -123,6 +124,12 @@ MSG_SELECT_CIRCUIT_FIRST = "请先选择一个回路后再进行操作。"
 MSG_CIRCUIT_NAME_OR_DB_EMPTY = "回路名称或配电箱未选择。"
 MSG_CIRCUIT_EDIT_HINT = "提示：除配电箱外，其他节点不能同时存在于不同回路。"
 MSG_NO_CONDUITS = "尚未生成任何导管连接。请先使用“导管工具”生成导管。"
+MSG_ALREADY_IN_CIRCUIT = "该节点已在回路中，不能重复添加。"
+MSG_CREATED_CIRCUIT = "已创建回路：{name}"
+MSG_NO_DISTRIBUTION_BOX = "未找到配电箱，请先在图中添加配电箱或在选择中包含配电箱。"
+MSG_ONLY_ONE_DISTRIBUTION_BOX = "一个回路只能包含一个配电箱。"
+
+
 
 # 导线类型
 WIRE_TYPE_N = "零线(N)"
