@@ -4,7 +4,8 @@ import uuid
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QToolBar, QGraphicsView, QLabel, QStatusBar,
                              QMessageBox, QDockWidget, QFormLayout, QDialog,
-                             QLineEdit, QSpinBox, QDoubleSpinBox, QPushButton)
+                             QLineEdit, QSpinBox, QDoubleSpinBox, QPushButton,
+                             QComboBox)
 from PyQt6.QtGui import QAction, QIcon, QKeySequence
 from PyQt6.QtCore import Qt
 
@@ -14,6 +15,7 @@ from src.frontend.canvas import CircuitScene, NodeItem, ConduitItem
 from src.frontend.dialogs import NodePropertyDialog, UnitDefinitionDialog, SwitchGangSelectDialog
 from src.frontend.unit_manager import UnitManagerDialog
 from src.frontend.circuit_manager import CircuitManagerDialog
+from src.frontend.property_panel import PropertyPanelManager
 from src.common import messages
 
 class MainWindow(QMainWindow):
@@ -27,6 +29,10 @@ class MainWindow(QMainWindow):
         
         # UI 组件
         self.setup_ui()
+
+        # 属性面板管理器
+        self.prop_manager = PropertyPanelManager(self)
+        self.scene.selectionChanged.connect(self.prop_manager.update_panel)   # 场景选择改变后更新属性面板
 
         # 状态变量
         self.current_action = None  # 当前选中的工具动作
@@ -44,6 +50,7 @@ class MainWindow(QMainWindow):
         }
         # 默认参数锁定状态
         self.defaults_locked = False
+        
         # 鼠标默认为选择工具
         self.enable_box_selection()
         
@@ -127,7 +134,6 @@ class MainWindow(QMainWindow):
         self.prop_dock.setWidget(self.prop_widget)  # 属性面板展示盒的内容区域设置为属性面板展示盒的内容区域        
         self.prop_layout = QFormLayout(self.prop_widget)    # 属性面板展示盒的内容区域布局为表单布局
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.prop_dock)   # 属性面板展示盒添加到主窗口
-        self.scene.selectionChanged.connect(self.update_properties_panel)   # 画布选择改变信号连接到更新属性面板方法       
         file_menu.addAction(messages.MENU_FILE_OPEN_PROP_PANEL, self.prop_dock.show)       # 属性面板打开关闭按钮
 
     def keyPressEvent(self, event):
@@ -141,12 +147,7 @@ class MainWindow(QMainWindow):
         action = QAction(name, self)
         action.triggered.connect(callback)
         self.toolbar.addAction(action)
-    """
-    def set_select_mode(self):
-        self.scene.mode = "select"
-        self.view.setDragMode(QGraphicsView.DragMode.NoDrag)
-        self.status_bar.showMessage(messages.MSG_SELECT_MODE)
-    """
+
     def enable_box_selection(self):
         self.scene.mode = "select"
         self.scene.reset_temp_state()
@@ -157,7 +158,7 @@ class MainWindow(QMainWindow):
         self.scene.mode = "add_node"
         self.scene.current_node_type = node_type
         self.status_bar.showMessage(messages.MSG_ADD_NODE_MODE.format(node_type=node_type.value))   # 状态栏显示添加节点工具提示        
-        self.update_properties_panel()       # 确保属性面板显示默认参数区域
+        self.prop_manager.update_panel()       # 确保属性面板显示默认参数区域
 
     def _prefix_for(self, node_type: NodeType) -> str:  # 节点类型映射
         if node_type == NodeType.DISTRIBUTION_BOX:
@@ -298,7 +299,7 @@ class MainWindow(QMainWindow):
             if node:
                 node.uncontrolled_unit_id = unit_id
         QMessageBox.information(self, messages.DLG_INFO_TITLE, messages.MSG_CREATED_UNCONTROLLED.format(unit_name=name, count=len(final_ids)))
-        self.update_properties_panel()
+        self.prop_manager.update_panel()
     
     def define_controlled_from_selection(self):
         """基于当前选择定义受控单元（需选择开关与联数）"""
@@ -346,7 +347,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, messages.DLG_INFO_TITLE, messages.MSG_CREATED_CONTROLLED.format(
                     unit_name=unit_name, count=len(final_ids), switch_label=switch.label, gang=gang
                 ))
-                self.update_properties_panel()
+                self.prop_manager.update_panel()
 
     def calculate_wiring(self):
         """执行四步法布线计算"""
@@ -385,6 +386,7 @@ class MainWindow(QMainWindow):
             self.scene.add_conduit_item(conduit)
 
     def clear_all_nodes(self):
+        """ 清空所有节点（确认后）"""
         reply = QMessageBox.question(self, messages.DLG_CONFIRM_TITLE, messages.DLG_CONFIRM_CLEAR_NODES,
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
@@ -395,6 +397,7 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("已清空所有节点")
 
     def clear_all_conduits(self):
+        """ 清空所有导管（确认后）"""
         reply = QMessageBox.question(self, messages.DLG_CONFIRM_TITLE, messages.DLG_CONFIRM_CLEAR_CONDUITS,
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
@@ -403,6 +406,7 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("已清空所有导管")
 
     def clear_all_wires(self):
+        """ 清空所有导线（确认后）"""
         reply = QMessageBox.question(self, messages.DLG_CONFIRM_TITLE, messages.DLG_CONFIRM_CLEAR_WIRES,
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
@@ -411,6 +415,7 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("已清空所有导线")
 
     def delete_selected_items(self):
+        """ 删除选中的项（确认后）"""
         selected_items = self.scene.selectedItems()
         if not selected_items:
             return
@@ -440,246 +445,14 @@ class MainWindow(QMainWindow):
         # 刷新
         self.refresh_scene_full()
         self.status_bar.showMessage(messages.MSG_DELETED_ITEMS.format(count=count))
-        self.update_properties_panel()
+        self.prop_manager.update_panel()
 
-    def _clear_prop_layout(self):
-        while self.prop_layout.count():
-            item = self.prop_layout.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.deleteLater()
-
-    def _create_readonly_label(self, text, tooltip="双击编辑"):
-        """创建只读标签，支持双击编辑"""
-        label = QLabel(text)
-        label.setStyleSheet("QLabel { background-color: #f0f0f0; padding: 2px; border: 1px solid #ccc; }")
-        label.setToolTip(tooltip)
-        return label
-    
-    def _create_editable_field(self, initial_value, field_type="line", **kwargs):
-        """创建可编辑字段，支持双击切换编辑状态"""
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        
-        # 创建只读标签
-        if field_type == "line":
-            display = self._create_readonly_label(str(initial_value))
-            editor = QLineEdit(str(initial_value))
-        elif field_type == "spin":
-            display = self._create_readonly_label(str(initial_value))
-            editor = QSpinBox()
-            editor.setRange(kwargs.get("min", 0), kwargs.get("max", 100))
-            editor.setValue(initial_value)
-        elif field_type == "double_spin":
-            display = self._create_readonly_label(f"{initial_value:.2f}")
-            editor = QDoubleSpinBox()
-            editor.setRange(kwargs.get("min", 0.0), kwargs.get("max", 100.0))
-            editor.setDecimals(kwargs.get("decimals", 2))
-            editor.setSingleStep(kwargs.get("step", 0.1))
-            editor.setValue(initial_value)
-        
-        editor.setVisible(False)
-        layout.addWidget(display)
-        layout.addWidget(editor)
-        
-        def start_edit():
-            display.setVisible(False)
-            editor.setVisible(True)
-            if field_type in ["spin", "double_spin"]:
-                editor.setFocus()
-                editor.selectAll()
-            else:
-                editor.setFocus()
-                editor.selectAll()
-        
-        def finish_edit():
-            editor.setVisible(False)
-            display.setVisible(True)
-            if field_type == "line":
-                display.setText(editor.text())
-            elif field_type == "spin":
-                display.setText(str(editor.value()))
-            elif field_type == "double_spin":
-                display.setText(f"{editor.value():.2f}")
-        
-        display.mouseDoubleClickEvent = lambda e: start_edit()
-        editor.editingFinished.connect(finish_edit)
-        
-        container.editor = editor
-        container.display = display
-        container.get_value = lambda: editor.text() if field_type == "line" else editor.value()
-        
-        return container
-    
     def toggle_defaults_lock(self):
         """切换默认参数锁定状态"""
         self.defaults_locked = not self.defaults_locked
         self.status_bar.showMessage(
             messages.MSG_PARAMS_LOCKED if self.defaults_locked else messages.MSG_PARAMS_UNLOCKED
         )
-        self.update_properties_panel()
+        self.prop_manager.update_panel()
     
-    # ---------- 更新属性面板 ----------
-    def update_properties_panel(self):
-        self._clear_prop_layout()
-        selected = self.scene.selectedItems()
-        if not selected:
-            # 未选中任何项时，如果处于添加模式，展示默认参数编辑
-            if self.scene.mode == "add_node" and self.scene.current_node_type:
-                d = self.add_defaults.get(self.scene.current_node_type, {})
-                
-                # 添加标题和锁定按钮
-                title_container = QWidget()
-                title_layout = QHBoxLayout(title_container)
-                title_layout.setContentsMargins(0, 0, 0, 0)
-                title_layout.addWidget(QLabel(messages.PROP_DEFAULTS_TITLE))
-                
-                lock_btn = QPushButton(messages.PROP_LOCK_DEFAULTS if not self.defaults_locked else messages.PROP_UNLOCK_DEFAULTS)
-                lock_btn.clicked.connect(self.toggle_defaults_lock)
-                title_layout.addWidget(lock_btn)
-                title_layout.addStretch()
-                
-                self.prop_layout.addRow(title_container)
-                
-                # 如果参数已锁定，显示锁定状态但不允许编辑
-                if self.defaults_locked:
-                    self.prop_layout.addRow(QLabel(messages.PROP_DEFAULT_ID), QLabel(d.get("id", "") or "自动生成"))
-                    self.prop_layout.addRow(QLabel(messages.PROP_DEFAULT_LABEL), QLabel(d.get("label_prefix", "")))
-                    if self.scene.current_node_type == NodeType.SWITCH:
-                        self.prop_layout.addRow(QLabel(messages.PROP_DEFAULT_GANGS), QLabel(str(d.get("gangs", 1))))
-                    if self.scene.current_node_type in (NodeType.LIGHT, NodeType.SOCKET):
-                        self.prop_layout.addRow(QLabel(messages.PROP_DEFAULT_POWER), QLabel(str(d.get("power", 0))))
-                    self.prop_layout.addRow(QLabel(messages.PROP_DEFAULT_RATED_CURRENT), QLabel(f"{d.get('rated_current', 0.0):.2f}"))
-                else:
-                    # 正常编辑模式
-                    id_default = QLineEdit(d.get("id", ""))
-                    id_default.editingFinished.connect(lambda: d.__setitem__("id", id_default.text().strip()))
-                    self.prop_layout.addRow(QLabel(messages.PROP_DEFAULT_ID), id_default)
-                    
-                    label_prefix = QLineEdit(d.get("label_prefix", ""))
-                    label_prefix.editingFinished.connect(lambda: d.__setitem__("label_prefix", label_prefix.text()))
-                    self.prop_layout.addRow(QLabel(messages.PROP_DEFAULT_LABEL), label_prefix)
-                    
-                    if self.scene.current_node_type == NodeType.SWITCH:
-                        gangs_default = QSpinBox()
-                        gangs_default.setRange(1, 8)
-                        gangs_default.setValue(int(d.get("gangs", 1)))
-                        gangs_default.valueChanged.connect(lambda v: d.__setitem__("gangs", int(v)))
-                        self.prop_layout.addRow(QLabel(messages.PROP_DEFAULT_GANGS), gangs_default)
-                    
-                    if self.scene.current_node_type in (NodeType.LIGHT, NodeType.SOCKET):
-                        power_default = QSpinBox()
-                        power_default.setRange(0, 10000)
-                        power_default.setValue(int(d.get("power", 0)))
-                        power_default.valueChanged.connect(lambda v: d.__setitem__("power", int(v)))
-                        self.prop_layout.addRow(QLabel(messages.PROP_DEFAULT_POWER), power_default)
-                    
-                    rc_default = QDoubleSpinBox()
-                    rc_default.setRange(0.0, 100.0)
-                    rc_default.setDecimals(2)
-                    rc_default.setSingleStep(0.1)
-                    rc_default.setValue(float(d.get("rated_current", 0.0)))
-                    rc_default.valueChanged.connect(lambda v: d.__setitem__("rated_current", float(v)))
-                    self.prop_layout.addRow(QLabel(messages.PROP_DEFAULT_RATED_CURRENT), rc_default)
-            return
 
-        # 只要选中了项，就处理第一个
-        item = selected[0]
-        # 递归寻找父项直到 NodeItem 或 ConduitItem
-        while item and not isinstance(item, (NodeItem, ConduitItem)):
-            item = item.parentItem()
-            
-        if isinstance(item, NodeItem):
-            node = item.node
-            # 编辑ID（双击编辑）
-            id_field = self._create_editable_field(node.id, "line")
-            def on_id_changed():
-                new_id = id_field.get_value().strip()
-                if not new_id:
-                    QMessageBox.warning(self, messages.DLG_WARNING_TITLE, messages.MSG_ID_EMPTY)
-                    id_field.editor.setText(node.id)
-                    id_field.display.setText(node.id)
-                    return
-                try:
-                    self.system.rename_node_id(node.id, new_id)
-                    self.refresh_scene_full()
-                except Exception as e:
-                    QMessageBox.warning(self, messages.DLG_WARNING_TITLE, str(e))
-                    id_field.editor.setText(node.id)
-                    id_field.display.setText(node.id)
-            id_field.editor.editingFinished.connect(on_id_changed)
-            self.prop_layout.addRow(QLabel(messages.PROP_EDIT_ID + f" ({messages.PROP_DOUBLE_CLICK_TO_EDIT})"), id_field)
-            
-            # 编辑标签（双击编辑）
-            label_field = self._create_editable_field(node.label, "line")
-            label_field.editor.editingFinished.connect(
-                lambda: setattr(node, "label", label_field.get_value())
-            )
-            self.prop_layout.addRow(QLabel(messages.PROP_EDIT_LABEL + f" ({messages.PROP_DOUBLE_CLICK_TO_EDIT})"), label_field)
-            
-            # 类型特定（双击编辑）
-            if node.node_type == NodeType.SWITCH:
-                gangs_field = self._create_editable_field(int(node.gangs or 1), "spin", min=1, max=8)
-                gangs_field.editor.valueChanged.connect(lambda v: setattr(node, "gangs", int(v)))
-                self.prop_layout.addRow(QLabel(messages.PROP_EDIT_GANGS + f" ({messages.PROP_DOUBLE_CLICK_TO_EDIT})"), gangs_field)
-            
-            if node.node_type in (NodeType.LIGHT, NodeType.SOCKET):
-                power_field = self._create_editable_field(int(node.power or 0), "spin", min=0, max=10000)
-                power_field.editor.valueChanged.connect(lambda v: setattr(node, "power", int(v)))
-                self.prop_layout.addRow(QLabel(messages.PROP_EDIT_POWER + f" ({messages.PROP_DOUBLE_CLICK_TO_EDIT})"), power_field)
-            
-            # 额定电流与用途（双击编辑）
-            rc_field = self._create_editable_field(float(node.rated_current or 0.0), "double_spin", min=0.0, max=100.0, decimals=2, step=0.1)
-            rc_field.editor.valueChanged.connect(lambda v: setattr(node, "rated_current", float(v)))
-            self.prop_layout.addRow(QLabel(messages.PROP_EDIT_RATED_CURRENT + f" ({messages.PROP_DOUBLE_CLICK_TO_EDIT})"), rc_field)
-            
-            usage_field = self._create_editable_field(node.usage or "", "line")
-            usage_field.editor.editingFinished.connect(lambda: setattr(node, "usage", usage_field.get_value()))
-            self.prop_layout.addRow(QLabel(messages.PROP_EDIT_USAGE + f" ({messages.PROP_DOUBLE_CLICK_TO_EDIT})"), usage_field)
-            
-            # 非编辑信息
-            self.prop_layout.addRow(QLabel(messages.PROP_TYPE), QLabel(node.node_type.value))
-            self.prop_layout.addRow(QLabel(messages.PROP_POSITION), QLabel(f"({int(node.x)}, {int(node.y)})"))
-            
-        elif isinstance(item, ConduitItem):
-            conduit = item.conduit
-            start = self.system.nodes.get(conduit.start_node_id)
-            end = self.system.nodes.get(conduit.end_node_id)
-            
-            # 展示导管基本信息
-            self.prop_layout.addRow(QLabel(messages.PROP_ID), QLabel(conduit.id))
-            self.prop_layout.addRow(QLabel(messages.PROP_START_NODE), QLabel(start.label if start else conduit.start_node_id))
-            self.prop_layout.addRow(QLabel(messages.PROP_END_NODE), QLabel(end.label if end else conduit.end_node_id))
-            self.prop_layout.addRow(QLabel(messages.PROP_LENGTH), QLabel(f"{conduit.length:.1f}"))
-            
-            if conduit.circuit_id:
-                self.prop_layout.addRow(QLabel("所属回路"), QLabel(conduit.circuit_id))
-            
-            # 导线统计
-            if conduit.wires:
-                self.prop_layout.addRow(QLabel("-" * 20), QLabel("-" * 20))
-                self.prop_layout.addRow(QLabel("【导线详情】"), QLabel(f"共 {len(conduit.wires)} 根"))
-                
-                counts = {}
-                sum_current = 0.0
-                for i, w in enumerate(conduit.wires):
-                    sum_current += getattr(w, "current", 0.0)
-                    counts[w.wire_type] = counts.get(w.wire_type, 0) + 1
-                    
-                    # 每一根导线的详细属性
-                    wire_info = f"{w.wire_type.value}"
-                    if w.unit_id:
-                        wire_info += f" (单元:{w.unit_id})"
-                    if w.current > 0:
-                        wire_info += f" 电流:{w.current:.2f}A"
-                    
-                    self.prop_layout.addRow(QLabel(f"导线 {i+1}"), QLabel(wire_info))
-                
-                self.prop_layout.addRow(QLabel("-" * 20), QLabel("-" * 20))
-                # 统计摘要
-                summary = "； ".join([f"{wt.value}:{counts[wt]}根" for wt in counts])
-                self.prop_layout.addRow(QLabel(messages.PROP_WIRES), QLabel(summary))
-                self.prop_layout.addRow(QLabel(messages.PROP_WIRE_SUM_CURRENT), QLabel(f"{sum_current:.2f} A"))
-            else:
-                self.prop_layout.addRow(QLabel(messages.PROP_WIRES), QLabel("无导线"))
